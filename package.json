@@ -1,0 +1,62 @@
+{
+  "name": "proposal-portal",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "dev": "next dev",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:test": "supabase test db",
+    "test:integration": "node supabase/tests/integration/phase2-api.mjs",
+    "test:app": "node supabase/tests/integration/phase2-app.mjs",
+    "test:dashboard": "node supabase/tests/integration/phase3-dashboard.mjs",
+    "test:browser": "node supabase/tests/integration/phase3-browser.mjs",
+    "test:pdf": "node supabase/tests/integration/phase4-pdf-links.mjs",
+    "test:pdf-browser": "node supabase/tests/integration/phase4-browser.mjs",
+    "test:client": "node supabase/tests/integration/phase5-client.mjs",
+    "test:client-browser": "node supabase/tests/integration/phase5-browser.mjs",
+    "measure:bundles": "node supabase/tests/integration/measure-bundles.mjs",
+    "test:ui": "node supabase/tests/integration/phase6-ui.mjs",
+    "health": "node scripts/health-check.mjs",
+    "storage:cleanup": "node scripts/storage-cleanup.mjs",
+    "test:hardening": "node supabase/tests/integration/phase7-hardening.mjs",
+    "test:history": "node supabase/tests/integration/feature-history-deletion.mjs",
+    "test:history-browser": "node supabase/tests/integration/feature-history-browser.mjs",
+    "test:cron": "node supabase/tests/integration/deploy-cron.mjs",
+    "test:payments": "node supabase/tests/integration/feature-payments.mjs",
+    "test:full-access": "node supabase/tests/integration/feature-full-access.mjs"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "lucide-react": "^1.61.0",
+    "next": "16.4.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.3",
+    "supabase": "^2.122.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

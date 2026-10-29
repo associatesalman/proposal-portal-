@@ -1,0 +1,23 @@
+# Files never uploaded by `vercel deploy` (the build runs on Vercel and
+# reinstalls dependencies). Secrets, local state, test output, documents.
+.env*
+!.env.example
+.vercel
+.next
+node_modules
+public/pdfjs
+*.tsbuildinfo
+next-env.d.ts
+coverage
+supabase/.temp
+supabase/.branches
+supabase/tests
+*.pdf
+*.log
+*.dump
+*.sql.gz
+*.backup
+*.pem
+test-output*
+screenshots*
+supabase/snippets

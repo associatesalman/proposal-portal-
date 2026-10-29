@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+/* One light theme for the whole app (internal pages and the client page):
+   white surfaces, slate text, one blue accent. The app stays white whatever
+   the visitor's colour scheme. Text/background pairs meet WCAG AA:
+   foreground 17.9:1, muted 7.6:1, subtle 4.8:1, accent 5.2:1 on white. */
+:root {
+  color-scheme: light;
+
+  --background: #ffffff;
+  --foreground: #0f172a;
+  /* Dark navy for headings and large numbers (16.4:1 on white). */
+  --navy: #0b1e44;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --surface-sunken: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --muted: #475569;
+  --subtle: #64748b;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-foreground: #ffffff;
+  --accent-soft: #eff6ff;
+  --accent-border: #bfdbfe;
+  --accent-strong: #1e40af;
+
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-soft: #fef2f2;
+  --danger-border: #fecaca;
+  --success: #15803d;
+  --success-soft: #f0fdf4;
+  --success-border: #bbf7d0;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
+  --warning-border: #fde68a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-navy: var(--navy);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-border: var(--accent-border);
+  --color-accent-strong: var(--accent-strong);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.03);
+  --shadow-raised: 0 2px 4px -1px rgb(15 23 42 / 0.05), 0 10px 24px -8px rgb(15 23 42 / 0.1);
+  --shadow-panel: 0 1px 2px rgb(15 23 42 / 0.04), 0 24px 56px -20px rgb(30 64 175 / 0.2);
+  --shadow-overlay: 0 12px 32px -8px rgb(15 23 42 / 0.18), 0 4px 8px -4px rgb(15 23 42 / 0.08);
+  --shadow-accent: 0 1px 2px rgb(30 64 175 / 0.2), 0 8px 18px -8px rgb(37 99 235 / 0.55);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* --- Motion -----------------------------------------------------------------
+   Short opacity/transform transitions only. Dialogs fade and lift in
+   (~200 ms) and fade out; the element stays rendered while it fades
+   (allow-discrete), and browsers without that support simply skip the exit
+   fade. Nothing waits for an animation before it can be used. */
+
+dialog.ui-dialog {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+}
+dialog.ui-dialog[open] {
+  opacity: 1;
+  transform: none;
+}
+@starting-style {
+  dialog.ui-dialog[open] {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+dialog.ui-dialog::backdrop {
+  background-color: rgb(15 23 42 / 0);
+  transition:
+    background-color 200ms ease-out,
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+}
+dialog.ui-dialog[open]::backdrop {
+  background-color: rgb(11 30 68 / 0.45);
+}
+@starting-style {
+  dialog.ui-dialog[open]::backdrop {
+    background-color: rgb(15 23 42 / 0);
+  }
+}
+/* A closing dialog (and its backdrop) never blocks clicks on the page while
+   it fades out. */
+dialog.ui-dialog:not([open]),
+dialog.ui-dialog:not([open])::backdrop {
+  pointer-events: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.animate-toast-in {
+  animation: toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.animate-toast-out {
+  animation: toast-out 160ms ease-in forwards;
+}
+.animate-fade-in {
+  animation: fade-in 160ms ease-out;
+}
+
+/* Entrances run once, when an element first mounts. Search, refresh and data
+   updates keep the same DOM nodes, so they don't replay. Opacity and
+   transform only: elements stay clickable throughout, and staggered delays
+   stay under 200 ms. */
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+.animate-enter {
+  animation: enter-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+
+/* Login artwork: the shapes settle into place once (within about 2.5 s) and
+   then stay still. */
+@keyframes art-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+}
+@keyframes art-draw {
+  from {
+    stroke-dashoffset: var(--dash, 400);
+  }
+}
+@keyframes art-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+.login-art .art-rise,
+.login-art .art-grow {
+  transform-box: fill-box;
+}
+.login-art .art-rise {
+  transform-origin: center;
+  animation: art-rise 900ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--art-delay, 0ms) both;
+}
+.login-art .art-grow {
+  transform-origin: left center;
+  animation: art-grow 700ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--art-delay, 0ms) both;
+}
+.login-art .art-draw {
+  stroke-dasharray: var(--dash, 400);
+  animation: art-draw 1600ms cubic-bezier(0.4, 0, 0.2, 1) var(--art-delay, 0ms) both;
+}
+
+/* Reduced motion: animations and transitions finish at once (1 ms rather
+   than none, so end events still fire); spinners stop turning but their
+   text labels still say what is happening. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after,
+  ::backdrop {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

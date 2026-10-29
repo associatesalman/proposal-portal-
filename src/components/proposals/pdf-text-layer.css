@@ -1,0 +1,81 @@
+/* Text layer for the client preview viewer: transparent, selectable text
+   positioned over the rendered canvas, so preview text can be selected,
+   copied and found with the browser's search. Subset of the .textLayer
+   rules in pdfjs-dist/web/pdf_viewer.css (Apache-2.0, Mozilla). The
+   container sets --total-scale-factor to the current render scale. */
+
+.pdf-page {
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+
+.pdf-page .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdf-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdf-page .textLayer > :not(.markedContent),
+.pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.pdf-page .textLayer .markedContent {
+  display: contents;
+}
+
+.pdf-page .textLayer span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+
+.pdf-page .textLayer ::selection {
+  background: rgb(37 99 235 / 0.25);
+  color: transparent;
+}
+
+.pdf-page .textLayer br::selection {
+  background: transparent;
+}
+
+.pdf-page .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.pdf-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
