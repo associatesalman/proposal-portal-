@@ -35,12 +35,6 @@ const DEFAULTS = {
   link_page_ip: { limit: 120, windowSeconds: 60 },
   link_preview_ip: { limit: 120, windowSeconds: 60 },
   link_preview_token: { limit: 300, windowSeconds: 60 },
-  // Full Access links: viewing the complete PDF, and file downloads (PDF or
-  // original), per address and per link.
-  link_document_ip: { limit: 120, windowSeconds: 60 },
-  link_document_token: { limit: 300, windowSeconds: 60 },
-  link_download_ip: { limit: 30, windowSeconds: 600 },
-  link_download_token: { limit: 60, windowSeconds: 600 },
   // Lookups of links that don't exist, per address. Over the limit, further
   // unknown links get "too many requests" until the window ends; valid
   // links are not affected.

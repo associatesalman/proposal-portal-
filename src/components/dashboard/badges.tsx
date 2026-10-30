@@ -1,6 +1,5 @@
 import { badgeStyles } from "@/components/ui/styles";
 import { formatLabel } from "@/lib/documents/formats";
-import { formatDate } from "@/lib/format";
 import type { Database } from "@/types/database";
 
 type ProposalStatus = Database["public"]["Enums"]["proposal_status"];
@@ -27,20 +26,15 @@ export function StatusBadge({ status }: { status: ProposalStatus }) {
 export function PdfStateBadge({
   hasOriginal,
   hasPreview,
-  accessMode = "preview",
   sourceFormat = null,
 }: {
   hasOriginal: boolean | null;
   hasPreview: boolean | null;
-  accessMode?: "preview" | "full";
   // The original upload's format when it wasn't a PDF (converted).
   sourceFormat?: string | null;
 }) {
   const badge = !hasOriginal ? (
     <span className={badgeStyles.outline}>Not uploaded</span>
-  ) : accessMode === "full" ? (
-    // A Full Access link needs only the document itself.
-    <span className={badgeStyles.success}>Document ready</span>
   ) : !hasPreview ? (
     <span className={badgeStyles.warning}>Uploaded</span>
   ) : (
@@ -53,29 +47,6 @@ export function PdfStateBadge({
       <span className="text-xs text-subtle" title={`Uploaded as ${formatLabel(sourceFormat)}, converted to PDF`}>
         {formatLabel(sourceFormat)}
       </span>
-    </span>
-  );
-}
-
-// How the proposal's (next) link shares the document. A Full Access link
-// with an open manual grant is labelled "Manual full access" (never a
-// payment).
-export function AccessModeBadge({
-  accessMode,
-  grantedAt,
-}: {
-  accessMode: "preview" | "full";
-  grantedAt: string | null;
-}) {
-  if (accessMode === "preview") return <span className={badgeStyles.neutral}>Preview</span>;
-  return (
-    <span className="inline-flex flex-col items-start gap-1">
-      <span className={badgeStyles.accent}>Full Access</span>
-      {grantedAt ? (
-        <span className="text-xs text-subtle" data-manual-grant>
-          Manual full access · {formatDate(grantedAt)}
-        </span>
-      ) : null}
     </span>
   );
 }

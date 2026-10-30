@@ -31,9 +31,7 @@ export type ProposalListRow = Pick<
   | "link_created_at"
   | "deletion_requested_at"
   | "has_payments"
-  | "access_mode"
   | "source_format"
-  | "full_access_granted_at"
 >;
 
 export type Page<Row> = {
@@ -187,7 +185,7 @@ export async function listProposals(
   let query = supabase
     .from("proposal_list")
     .select(
-      "id, title, status, has_original, has_preview, created_at, client_id, client_name, owner_id, owner_name, link_created_at, deletion_requested_at, has_payments, access_mode, source_format, full_access_granted_at",
+      "id, title, status, has_original, has_preview, created_at, client_id, client_name, owner_id, owner_name, link_created_at, deletion_requested_at, has_payments, source_format",
       { count: "exact" },
     );
   if (params.owner) query = query.eq("owner_id", params.owner);

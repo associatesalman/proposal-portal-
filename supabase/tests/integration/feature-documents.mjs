@@ -1,8 +1,8 @@
-// Manual Full Access links, document downloads and multi-format uploads.
+// Document uploads, formats and preview links (manual Full Access removed).
 //
 //   npm run build
-//   npm run test:full-access                 # HTTP checks
-//   CHROME_PATH="..." npm run test:full-access   # + headless Chrome checks
+//   npm run test:documents                   # HTTP checks
+//   CHROME_PATH="..." npm run test:documents  # + headless Chrome checks
 //
 // Two DEDICATED app servers are started from the current build (the running
 // dev server, if any, is not touched):
@@ -13,6 +13,10 @@
 // (flags, isolated workspace and profile, no secrets in the environment)
 // and writes a PDF with a requested page count, or hangs/crashes/produces
 // nothing on request. Real LibreOffice rendering is NOT verified here.
+//
+// Also checks that manual Full Access is gone: every link is a preview link,
+// /p/<token>/document, /download and /original no longer exist, and Full
+// Access fields sent to the link action are ignored.
 //
 // Requests are sent with a TEST-NET client address (x-forwarded-for), so
 // the rate-limit counters of 127.0.0.1 used by other suites aren't touched.
@@ -58,7 +62,7 @@ const { encodeReply } = require("next/dist/compiled/react-server-dom-turbopack/c
 const pdfjs = await import(pathToFileURL(require.resolve("pdfjs-dist/legacy/build/pdf.mjs")).href);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")).href;
 
-const OUT = join(process.env.TEMP ?? tmpdir(), `portal-full-access-${process.pid}`);
+const OUT = join(process.env.TEMP ?? tmpdir(), `portal-documents-${process.pid}`);
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DOUBLE = resolve("supabase/tests/integration/lib/libreoffice-double.mjs");
@@ -90,9 +94,6 @@ async function startServer(port, extraEnv) {
       RATE_LIMIT_LINK_PAGE_IP: "2000/60",
       RATE_LIMIT_LINK_PREVIEW_IP: "2000/60",
       RATE_LIMIT_LINK_MISS_IP: "2000/60",
-      RATE_LIMIT_LINK_DOCUMENT_IP: "2000/60",
-      RATE_LIMIT_LINK_DOWNLOAD_IP: "2000/60",
-      RATE_LIMIT_LINK_DOWNLOAD_TOKEN: "2000/60",
       RATE_LIMIT_UPLOAD_PREPARE_USER: "2000/60",
       RATE_LIMIT_UPLOAD_COMPLETE_USER: "2000/60",
       RATE_LIMIT_PREVIEW_GENERATE_USER: "2000/60",
@@ -259,20 +260,22 @@ function visibleText(html) {
     .replace(/\s+/g, " ");
 }
 
-// Public responses must never carry internal identities, notes or paths.
-function leaksInternals(text, { leads, proposal, note }) {
+// Public responses must never carry internal identities or paths.
+function leaksInternals(text, { leads, proposal }) {
   const needles = [
     ...leads.flatMap((lead) => [lead.fullName, lead.email, lead.id]),
     proposal.id,
     proposal.owner_id,
     "storage_path",
     "original.pdf",
-    "Manual full access",
-    "granted",
-    ...(note ? [note] : []),
+    "source.",
   ];
   return needles.filter((needle) => needle && text.includes(needle));
 }
+
+// Routes that served the whole document before manual Full Access was
+// removed (20261103090000). They must not exist for any token.
+const REMOVED_ROUTES = ["document", "download", "original"];
 
 // ---------------------------------------------------------------------------
 // Checks
@@ -290,12 +293,13 @@ async function main() {
   const leads = [leadA, leadB, admin];
   const paymentsBefore = (await trusted.from("payments").select("id", { count: "exact", head: true })).count;
 
-  // 1. The 15/12/3 manual workflow ------------------------------------------------
+  // 1. Preview link on a 15-page document (12 free, 3 locked) -----------------------
   const title = `Fifteen ${runId}`;
   const draft = await createDraft(leadA, title);
   const pdf15 = await makePdf(15, "Fifteen");
   const up15 = await upload(leadA, draft.id, pdf15, { fileName: "fifteen.pdf" });
   check("15-page PDF uploads and verifies", up15.ok && up15.data.document.totalPages === 15, up15.message);
+  check("the setup has no access mode or manual grant any more", up15.ok && !("accessMode" in up15.data) && !("fullAccess" in up15.data));
   const offer = await act(leadA, "saveOfferAction", {
     proposalId: draft.id,
     expectedRevision: up15.data.document.revision,
@@ -308,137 +312,95 @@ async function main() {
   check("preview link generated", previewLink.ok, previewLink.message);
   const T1 = tokenOf(previewLink);
   const before = await row(draft.id);
+  check("the proposal is in preview mode", before.access_mode === "preview");
 
   {
-    const page = visibleText(await (await get(FULL_URL, `/p/${T1}`)).text());
+    const html = await (await get(FULL_URL, `/p/${T1}`)).text();
+    const page = visibleText(html);
     check("preview page: 12 of 15 pages free, 3 locked", page.includes("Free preview: 12 of 15 pages") && page.includes("3 pages are locked"), page.slice(0, 400));
-    check("preview page has no download controls", !page.includes("Download PDF") && !page.includes("data-downloads"));
+    check("preview page has no download controls", !page.includes("Download PDF") && !html.includes("data-downloads"));
+    check("preview page names no Team Lead, ids or paths", leaksInternals(html, { leads, proposal: before }).length === 0, leaksInternals(html, { leads, proposal: before }).join(","));
     const { res, bytes } = await fetchBytes(FULL_URL, `/p/${T1}/preview`);
     check("preview token serves only the 12-page preview", res.status === 200 && (await pageCount(bytes)) === 12);
-    for (const kind of ["document", "download", "original"]) {
+    const previewText = await pdfText(bytes);
+    check("the preview PDF contains no locked page", previewText.includes("Fifteen page 12 of 15") && !previewText.includes("Fifteen page 13 of 15"));
+    for (const kind of REMOVED_ROUTES) {
       const r = await get(FULL_URL, `/p/${T1}/${kind}`);
-      check(`preview token cannot fetch /${kind} (404)`, r.status === 404, String(r.status));
+      const ct = r.headers.get("content-type") ?? "";
+      check(`removed route /p/<token>/${kind} serves no file (404)`, r.status === 404 && !ct.includes("pdf"), `${r.status} ${ct}`);
     }
     const forged = await fetchBytes(FULL_URL, `/p/${T1}/preview?mode=full&access=full&pages=15`);
     check("forged query parameters don't change the preview", forged.res.status === 200 && (await pageCount(forged.bytes)) === 12);
-    const forgedDoc = await get(FULL_URL, `/p/${T1}/document?mode=full&path=${encodeURIComponent(before.original_storage_path)}`);
-    check("forged mode/path parameters can't unlock the full document", forgedDoc.status === 404, String(forgedDoc.status));
     const forgedPage = await (await get(FULL_URL, `/p/${T1}?mode=full&access=full`)).text();
     check("forged page parameters still show the preview", visibleText(forgedPage).includes("Free preview: 12 of 15 pages") && !forgedPage.includes("data-full-access-view"));
   }
 
-  // Mode can't change behind the active link.
-  {
-    const res = await act(leadA, "setAccessModeAction", { proposalId: draft.id, mode: "full" });
-    check("access mode can't change while the link is active", !res.ok && /Revoke the active link/.test(res.message), res.message);
-    check("…and the database still says preview", (await row(draft.id)).access_mode === "preview");
-  }
-
   const revoked = await act(leadA, "revokeLinkAction", { proposalId: draft.id });
-  check("client paid outside the portal: old link revoked", revoked.ok, revoked.message);
+  check("link revoked", revoked.ok, revoked.message);
   check("revoked preview link is unavailable", (await (await get(FULL_URL, `/p/${T1}`)).text()).includes("This link isn"));
 
-  const modeSet = await act(leadA, "setAccessModeAction", { proposalId: draft.id, mode: "full" });
-  check("Full Access selected for the same stored document", modeSet.ok && modeSet.data.accessMode === "full", modeSet.message);
-  const afterMode = await row(draft.id);
-  check("no re-upload: same document revision and file", afterMode.original_storage_path === before.original_storage_path && afterMode.total_pages === 15);
-
-  const note = `Paid by bank transfer, INV-${runId}`;
-  const fullLink = await act(leadA, "generateLinkAction", { proposalId: draft.id, expectedRevision: up15.data.document.revision, note: `  ${note}  ` });
-  check("new Full Access link generated", fullLink.ok && /Full Access link created/.test(fullLink.message), fullLink.message);
-  const T2 = tokenOf(fullLink);
-  check("the new token differs from the old one", T2 !== T1);
-
+  // A Full Access request is now just an ignored field: the next link is
+  // still a preview link on the same stored document.
+  const relink = await act(leadA, "generateLinkAction", {
+    proposalId: draft.id,
+    expectedPreviewRevision: offer.data.preview.revision,
+    expectedRevision: up15.data.document.revision,
+    note: "paid by bank transfer",
+    mode: "full",
+  });
+  check("a new link is a preview link even when Full Access fields are sent", relink.ok && /Private link created/.test(relink.message), relink.message);
+  const T2 = tokenOf(relink);
+  const afterRelink = await row(draft.id);
+  check("no re-upload: same document revision", afterRelink.original_storage_path === before.original_storage_path && afterRelink.access_mode === "preview");
   {
-    const html = await (await get(FULL_URL, `/p/${T2}`)).text();
-    check("full link page shows all 15 pages", html.includes("data-full-access-view") && visibleText(html).includes("Full document: 15 pages"));
-    const text = visibleText(html);
-    check("full link page has no locked pages, paywall or payment notice", !/locked|unlock|price/i.test(text) && !text.includes("Online payment") && !text.includes("Pay with PayPal") && !html.includes("data-price") && !html.includes("unlock-heading"), text.slice(0, 300));
-    check("full link page names no Team Lead, note, ids or paths", leaksInternals(html, { leads, proposal: afterMode, note }).length === 0, leaksInternals(html, { leads, proposal: afterMode, note }).join(","));
-
-    const doc = await fetchBytes(FULL_URL, `/p/${T2}/document`);
-    check("full document: 200, PDF, inline, no-store, nosniff", doc.res.status === 200 && doc.res.headers.get("content-type") === "application/pdf" && /^inline;/.test(doc.res.headers.get("content-disposition") ?? "") && (doc.res.headers.get("cache-control") ?? "").includes("no-store") && doc.res.headers.get("x-content-type-options") === "nosniff");
-    check("full document has all 15 pages and is the stored revision", (await pageCount(doc.bytes)) === 15 && sha(doc.bytes) === sha(await storedBytes(before.original_storage_path)));
-    check("full document: no-referrer, same-origin resource policy, noindex", doc.res.headers.get("referrer-policy") === "no-referrer" && doc.res.headers.get("cross-origin-resource-policy") === "same-origin" && (doc.res.headers.get("x-robots-tag") ?? "").includes("noindex"));
-
-    const dl = await fetchBytes(FULL_URL, `/p/${T2}/download`);
-    const disposition = dl.res.headers.get("content-disposition") ?? "";
-    check("Download PDF: attachment with a safe title-based .pdf name", dl.res.status === 200 && disposition.startsWith("attachment;") && disposition.includes(`filename="Fifteen ${runId}.pdf"`) && disposition.includes("filename*=UTF-8''"), disposition);
-    check("Download PDF delivers the complete 15-page document", (await pageCount(dl.bytes)) === 15);
-    check("no original download for a PDF upload (404)", (await get(FULL_URL, `/p/${T2}/original`)).status === 404);
-    check("a Full Access token cannot fetch the preview (404)", (await get(FULL_URL, `/p/${T2}/preview`)).status === 404);
-    const forged = await fetchBytes(FULL_URL, `/p/${T2}/document?revision=${randomUUID()}&path=../../etc/passwd&token=${T1}`);
-    check("forged query parameters on a full link change nothing", forged.res.status === 200 && sha(forged.bytes) === sha(doc.bytes));
-    for (const kind of ["", "/preview", "/document", "/download"]) {
+    const page = visibleText(await (await get(FULL_URL, `/p/${T2}`)).text());
+    check("the new link shows only the 12-page preview and the price", page.includes("Free preview: 12 of 15 pages") && page.includes("3 pages are locked"));
+    for (const kind of ["", "/preview"]) {
       const r = await get(FULL_URL, `/p/${T1}${kind}`);
       const ok = kind === "" ? (await r.text()).includes("This link isn") : r.status === 404;
       check(`old token stays invalid: /p/<old>${kind}`, ok);
     }
-
-    const { data: display } = await anon.rpc("resolve_proposal_full_access", { p_token: T2 });
-    check("anon resolver returns display fields only", display?.length === 1 && JSON.stringify(Object.keys(display[0]).sort()) === JSON.stringify(["source_format", "title", "total_pages"]));
-    const { error: objErr } = await anon.rpc("resolve_proposal_full_object", { p_token: T2 });
-    check("anon cannot resolve Full Access storage paths", Boolean(objErr));
-  }
-
-  {
-    const { data: grants } = await trusted.from("proposal_full_access_grants").select("*").eq("proposal_id", draft.id);
-    const g = grants?.[0];
-    check("manual grant recorded: who, when, revision, pages, trimmed note", grants?.length === 1 && g.granted_by === leadA.id && g.granted_by_name === leadA.fullName && g.revision_id === up15.data.document.revision && g.total_pages === 15 && g.note === note && g.ended_at === null);
-    const { count } = await trusted.from("payments").select("id", { count: "exact", head: true }).eq("proposal_id", draft.id);
-    check("no payment record exists for the manual grant", count === 0);
-    const setup = await act(leadA, "loadProposalSetupAction", draft.id);
-    check("dashboard shows the manual grant with its note", setup.ok && setup.data.fullAccess?.note === note && setup.data.fullAccess?.grantedByName === leadA.fullName);
+    const { error: fullRpc } = await anon.rpc("resolve_proposal_full_access", { p_token: T2 });
+    check("the Full Access resolver no longer exists", Boolean(fullRpc));
+    const { count } = await trusted.from("proposal_full_access_grants").select("id", { count: "exact", head: true }).eq("proposal_id", draft.id);
+    check("no grant record is created", count === 0);
     const history = await (await fetch(`${FULL_URL}/dashboard?tab=history&q=${runId}`, { headers: { cookie: leadA.cookie } })).text();
-    check("History shows Full Access and 'Manual full access'", history.includes("Full Access") && history.includes("Manual full access"));
-    check("History never labels it a verified PayPal payment", !history.includes("Verified PayPal"));
-    const paymentsTab = await (await fetch(`${FULL_URL}/dashboard?tab=payments&q=${runId}`, { headers: { cookie: leadA.cookie } })).text();
-    check("Payments tab lists no payment for it", !paymentsTab.includes(title));
+    check("History has no Access column or manual-access label", !history.includes("Manual full access") && !history.includes(">Full Access<"));
   }
 
   // 2. Authorization: cross-lead denial, CEO access -----------------------------------
   {
     const denied = await Promise.all([
       act(leadB, "loadProposalSetupAction", draft.id),
-      act(leadB, "setAccessModeAction", { proposalId: draft.id, mode: "preview" }),
       act(leadB, "revokeLinkAction", { proposalId: draft.id }),
-      act(leadB, "generateLinkAction", { proposalId: draft.id, expectedRevision: up15.data.document.revision }),
+      act(leadB, "generateLinkAction", { proposalId: draft.id, expectedPreviewRevision: offer.data.preview.revision }),
       act(leadB, "prepareUploadAction", { proposalId: draft.id, sizeBytes: 1000, format: "pdf" }),
     ]);
     check("another Team Lead is refused every document action", denied.every((r) => !r.ok && /could not be found/.test(r.message)), denied.map((r) => r.message).join(" | "));
     check("…and nothing changed", (await row(draft.id)).status === "active");
 
     const ceoView = await act(admin, "loadProposalSetupAction", draft.id);
-    check("the CEO can manage the lead's proposal", ceoView.ok && ceoView.data.accessMode === "full" && ceoView.data.fullAccess !== null);
+    check("the CEO can manage the lead's proposal", ceoView.ok && ceoView.data.link !== null);
     const ceoRevoke = await act(admin, "revokeLinkAction", { proposalId: draft.id });
-    const ceoLink = await act(admin, "generateLinkAction", { proposalId: draft.id, expectedRevision: up15.data.document.revision });
-    check("the CEO revokes and re-grants Full Access", ceoRevoke.ok && ceoLink.ok, `${ceoRevoke.message} ${ceoLink.message}`);
+    const ceoLink = await act(admin, "generateLinkAction", { proposalId: draft.id, expectedPreviewRevision: offer.data.preview.revision });
+    check("the CEO revokes and re-issues the preview link", ceoRevoke.ok && ceoLink.ok, `${ceoRevoke.message} ${ceoLink.message}`);
     const T3 = tokenOf(ceoLink);
-    const { data: grants } = await trusted.from("proposal_full_access_grants").select("granted_by, ended_by, ended_at").eq("proposal_id", draft.id).order("granted_at");
-    check("grant history: lead's grant ended by the CEO, new open grant by the CEO", grants.length === 2 && grants[0].ended_by === admin.id && grants[0].ended_at && grants[1].granted_by === admin.id && grants[1].ended_at === null);
-    check("the CEO's new link works; the lead's link stopped", (await get(FULL_URL, `/p/${T3}/document`)).status === 200 && (await get(FULL_URL, `/p/${T2}/document`)).status === 404);
+    check("the CEO's new link works; the lead's link stopped", (await get(FULL_URL, `/p/${T3}/preview`)).status === 200 && (await get(FULL_URL, `/p/${T2}/preview`)).status === 404);
     const html = await (await get(FULL_URL, `/p/${T3}`)).text();
-    check("public page never shows the CEO either", leaksInternals(html, { leads, proposal: afterMode, note }).length === 0);
-    check("an active Full Access document can't be replaced", !(await upload(leadA, draft.id, await makePdf(3, "x"), { expectedRevision: up15.data.document.revision })).ok);
+    check("public page never shows the CEO either", leaksInternals(html, { leads, proposal: before }).length === 0);
+    check("an active link's document can't be replaced", !(await upload(leadA, draft.id, await makePdf(3, "x"), { expectedRevision: up15.data.document.revision })).ok);
     await act(admin, "revokeLinkAction", { proposalId: draft.id });
   }
 
-  // 3. One-page Full Access -------------------------------------------------------------
+  // 3. One-page documents: accepted, but no link -------------------------------------------
   {
     const one = await createDraft(leadA, `One page ${runId}`);
     const up = await upload(leadA, one.id, await makePdf(1, "Single"), { fileName: "single.pdf" });
-    check("a one-page PDF is accepted", up.ok && up.data.document.totalPages === 1 && /Full Access/.test(up.message), up.message);
+    check("a one-page PDF is accepted with an explanation", up.ok && up.data.document.totalPages === 1 && /can't get a link/.test(up.message) && !/Full Access/.test(up.message), up.message);
     const offer1 = await act(leadA, "saveOfferAction", { proposalId: one.id, expectedRevision: up.data.document.revision, freePages: "1", price: "10", currency: "USD" });
     check("a one-page document can't get a locked preview", !offer1.ok);
-    const previewTry = await act(leadA, "generateLinkAction", { proposalId: one.id, expectedPreviewRevision: randomUUID() });
-    check("…nor a preview link", !previewTry.ok);
-    await act(leadA, "setAccessModeAction", { proposalId: one.id, mode: "full" });
-    const link = await act(leadA, "generateLinkAction", { proposalId: one.id, expectedRevision: up.data.document.revision });
-    check("one-page Full Access link generated (no preview or price)", link.ok, link.message);
-    const token = tokenOf(link);
-    const html = await (await get(FULL_URL, `/p/${token}`)).text();
-    const doc = await fetchBytes(FULL_URL, `/p/${token}/download`);
-    check("one-page Full Access link shows and downloads the page", /Full document: 1 page ?\./.test(visibleText(html)) && doc.res.status === 200 && (await pageCount(doc.bytes)) === 1);
+    const linkTry = await act(leadA, "generateLinkAction", { proposalId: one.id, expectedPreviewRevision: randomUUID(), expectedRevision: up.data.document.revision });
+    check("…nor any link", !linkTry.ok && (await row(one.id)).status === "draft");
   }
 
   // 4. Multi-format conversion (server with the converter double) ------------------------
@@ -462,16 +424,17 @@ async function main() {
     check(`${format.toUpperCase()}: stored source is byte-identical to the upload`, sha(await storedBytes(r.source_storage_path)) === sha(bytes));
     const text = await pdfText(await storedBytes(r.original_storage_path));
     check(`${format.toUpperCase()}: canonical PDF came from the converter (test double)`, text.includes(`Converted by test double from source.${format}`));
-    await act(leadA, "setAccessModeAction", { proposalId: d.id, mode: "full" });
-    const link = await act(leadA, "generateLinkAction", { proposalId: d.id, expectedRevision: revision });
+    const offerF = await act(leadA, "saveOfferAction", { proposalId: d.id, expectedRevision: revision, freePages: "1", price: "15", currency: "GBP" });
+    const link = await act(leadA, "generateLinkAction", { proposalId: d.id, expectedPreviewRevision: offerF.data?.preview?.revision });
     const token = tokenOf(link);
-    const original = await fetchBytes(FULL_URL, `/p/${token}/original`);
-    const disposition = original.res.headers.get("content-disposition") ?? "";
-    check(`${format.toUpperCase()}: Download original returns the exact upload with the right type`, original.res.status === 200 && original.res.headers.get("content-type") === MIME[format] && disposition.startsWith("attachment;") && disposition.includes(`.${format}"`) && sha(original.bytes) === sha(bytes) && original.res.headers.get("x-content-type-options") === "nosniff", `${original.res.headers.get("content-type")} ${disposition}`);
-    const pdfDl = await fetchBytes(FULL_URL, `/p/${token}/download`);
-    check(`${format.toUpperCase()}: Download PDF returns the ${pages}-page canonical PDF`, pdfDl.res.status === 200 && (await pageCount(pdfDl.bytes)) === pages);
+    const preview = await fetchBytes(FULL_URL, `/p/${token}/preview`);
+    check(`${format.toUpperCase()}: preview link serves only the first page of the converted PDF`, offerF.ok && link.ok && preview.res.status === 200 && (await pageCount(preview.bytes)) === 1);
+    for (const kind of REMOVED_ROUTES) {
+      const res = await get(FULL_URL, `/p/${token}/${kind}`);
+      check(`${format.toUpperCase()}: /${kind} serves neither the source nor the PDF (404)`, res.status === 404 && !(res.headers.get("content-type") ?? "").includes(MIME[format]));
+    }
     const html = await (await get(FULL_URL, `/p/${token}`)).text();
-    check(`${format.toUpperCase()}: client page offers 'Download original (${format.toUpperCase()})'`, html.includes(`Download original (${format.toUpperCase()})`), visibleText(html).slice(0, 300));
+    check(`${format.toUpperCase()}: client page offers no download`, !html.includes("Download original") && !html.includes("Download PDF"));
     converted ??= { id: d.id, token, revision, bytes, format };
   }
 
@@ -488,7 +451,7 @@ async function main() {
     const preview = await act(leadA, "saveOfferAction", { proposalId: d.id, expectedRevision: up.data.document.revision, freePages: "1", price: "5", currency: "EUR" }, PLAIN_URL);
     const link = await act(leadA, "generateLinkAction", { proposalId: d.id, expectedPreviewRevision: preview.data?.preview?.revision }, PLAIN_URL);
     const token = tokenOf(link);
-    check("converted documents also work as preview links", preview.ok && link.ok && (await pageCount((await fetchBytes(FULL_URL, `/p/${token}/preview`)).bytes)) === 1);
+    check("converted documents work as preview links", preview.ok && link.ok && (await pageCount((await fetchBytes(FULL_URL, `/p/${token}/preview`)).bytes)) === 1);
     check("a preview token can't download the original source (404)", (await get(FULL_URL, `/p/${token}/original`)).status === 404);
   }
 
@@ -497,7 +460,7 @@ async function main() {
     await act(leadA, "revokeLinkAction", { proposalId: converted.id });
     const up = await upload(leadA, converted.id, await makePdf(2, "Replacement"), { expectedRevision: converted.revision });
     const objects = await objectsUnder(`${leadA.id}/${converted.id}`);
-    check("replacing a converted document removes the old source and PDF", up.ok && objects.length === 1 && objects[0].endsWith(`/${up.data.document.revision}/original.pdf`), objects.join(","));
+    check("replacing a converted document removes the old source, PDF and preview", up.ok && objects.length === 1 && objects[0].endsWith(`/${up.data.document.revision}/original.pdf`), objects.join(","));
     check("…and the row no longer has a source", (await row(converted.id)).source_storage_path === null);
   }
 
@@ -589,12 +552,11 @@ async function main() {
     check("cleanup treats the current source, PDF and preview as referenced", scan.data?.length === 3 && scan.data.every((s) => s.classification === "referenced"), JSON.stringify(scan.data?.map((s) => s.classification)));
     const { error: removeErr } = await leadA.client.storage.from(BUCKET).remove([r.source_storage_path]);
     check("the owner can't delete the source file in use", !removeErr && (await objectsUnder(`${leadA.id}/${d.id}`)).length === 3);
-    await act(leadA, "setAccessModeAction", { proposalId: d.id, mode: "full" });
-    await act(leadA, "generateLinkAction", { proposalId: d.id, expectedRevision: up.data.document.revision, note: "to be deleted" });
+    const link = await act(leadA, "generateLinkAction", { proposalId: d.id, expectedPreviewRevision: offerDel.data.preview.revision });
+    const token = tokenOf(link);
     const del = await formAct(leadA, "deleteProposalAction", { proposalId: d.id });
     check("deleting removes the source, canonical PDF and preview", del?.status === "success" && (await objectsUnder(`${leadA.id}/${d.id}`)).length === 0, JSON.stringify(del));
-    const { count } = await trusted.from("proposal_full_access_grants").select("id", { count: "exact", head: true }).eq("proposal_id", d.id);
-    check("…and its grant records", count === 0);
+    check("…and its link stops working", (await get(FULL_URL, `/p/${token}/preview`)).status === 404);
   }
 
   const paymentsAfter = (await trusted.from("payments").select("id", { count: "exact", head: true })).count;
@@ -602,17 +564,17 @@ async function main() {
 
   // 8. Browser (optional: CHROME_PATH) ---------------------------------------------------------
   if (process.env.CHROME_PATH) {
-    await browserChecks({ leadA, title, draftId: draft.id, revision: up15.data.document.revision });
+    await browserChecks({ leadA, title, draftId: draft.id, previewRevision: offer.data.preview.revision });
   } else {
     console.log("skip   browser checks (set CHROME_PATH to run them)");
   }
 }
 
-async function browserChecks({ leadA, title, draftId, revision }) {
+async function browserChecks({ leadA, title, draftId, previewRevision }) {
   const { launchBrowser } = await import("./lib/browser.mjs");
   const shots = join(OUT, "screens");
   mkdirSync(shots, { recursive: true });
-  const link = await act(leadA, "generateLinkAction", { proposalId: draftId, expectedRevision: revision, note: "browser run" });
+  const link = await act(leadA, "generateLinkAction", { proposalId: draftId, expectedPreviewRevision: previewRevision });
   const token = tokenOf(link);
   const b = await launchBrowser({ chromePath: process.env.CHROME_PATH, outDir: shots, appUrl: FULL_URL });
   try {
@@ -629,16 +591,14 @@ async function browserChecks({ leadA, title, draftId, revision }) {
     for (const [width, height, mobile, tag] of [[1440, 900, false, "desktop"], [390, 844, true, "mobile"]]) {
       await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
       await b.navigate(`/p/${token}`);
-      const rendered = await b.waitFor(`!!document.querySelector('[data-full-access-view] [data-rendered-page] canvas')`, 20000);
-      check(`${tag}: Full Access page renders the document`, rendered);
-      check(`${tag}: page status shows 'Page 1 of 15'`, await b.waitFor(`document.querySelector('[data-page-status]').innerText.startsWith('Page 1 of 15')`, 5000));
-      check(`${tag}: selectable text layer present`, await b.waitFor(`document.querySelectorAll('.textLayer span').length > 0`, 5000));
-      check(`${tag}: Download PDF visible`, await b.evaluate(`(() => { const a = document.querySelector('[data-download=pdf]'); return !!a && a.checkVisibility() && a.getAttribute('href') === '/p/${token}/download'; })()`));
-      check(`${tag}: no locked placeholders or payment panel`, await b.evaluate(`!document.querySelector('#unlock-heading') && !document.body.innerText.includes('Online payment') && !/locked/i.test(document.body.innerText)`));
+      check(`${tag}: preview page renders the free pages`, await b.waitFor(`!!document.querySelector('[data-rendered-page] canvas')`, 20000));
+      check(`${tag}: page status shows 'Preview page 1 of 12'`, await b.waitFor(`document.querySelector('[data-page-status]').innerText.startsWith('Preview page 1 of 12')`, 5000));
+      check(`${tag}: no download controls`, await b.evaluate(`!document.querySelector('[data-downloads]') && !document.body.innerText.includes('Download PDF')`));
+      check(`${tag}: locked notice and price shown`, await b.evaluate(`!!document.querySelector('#unlock-heading') && !!document.querySelector('[data-price]')`));
       check(`${tag}: no horizontal scroll`, await noOverflow());
       const fit = await pageBox();
       check(`${tag}: fit width fills the stage without stretching`, fit && Math.abs(fit.w - fit.stageW) <= 2 && Math.abs(fit.w / fit.h - fit.ratio) < 0.02, JSON.stringify(fit));
-      await b.screenshot(`fa-01-full-${tag}`);
+      await b.screenshot(`doc-01-preview-${tag}`);
 
       await b.clickSelector('[aria-label="Fit page"]');
       await b.waitFor(`document.querySelector('[aria-label="Fit page"]').getAttribute('aria-pressed') === 'true' && !!document.querySelector('[data-rendered-page]')`, 5000);
@@ -647,7 +607,7 @@ async function browserChecks({ leadA, title, draftId, revision }) {
       check(`${tag}: fit page keeps the whole page within the window`, page && page.h <= page.vh && page.w <= fit.w + 1 && Math.abs(page.w / page.h - page.ratio) < 0.02, JSON.stringify(page));
 
       await b.clickSelector('[aria-label="Next page"]');
-      check(`${tag}: next page`, await b.waitFor(`document.querySelector('[data-page-status]').innerText.startsWith('Page 2 of 15') && document.querySelector('[data-rendered-page]')?.dataset.renderedPage === '2'`, 8000));
+      check(`${tag}: next page`, await b.waitFor(`document.querySelector('[data-page-status]').innerText.startsWith('Preview page 2 of 12') && document.querySelector('[data-rendered-page]')?.dataset.renderedPage === '2'`, 8000));
 
       await b.clickSelector("[data-fullscreen-toggle]");
       check(`${tag}: full screen toggle enters full screen (or the overlay fallback)`, await b.waitFor(`['native','fallback'].includes(document.querySelector('[data-viewer-state]').dataset.expanded)`, 5000));
@@ -656,7 +616,7 @@ async function browserChecks({ leadA, title, draftId, revision }) {
       check(`${tag}: the viewer fills the screen while expanded`, expanded.w >= width - 2 && expanded.h >= height - 2, JSON.stringify(expanded));
       check(`${tag}: page re-renders after the transition`, await b.waitFor(`!!document.querySelector('[data-rendered-page="2"] canvas') && document.querySelectorAll('.pdf-page canvas').length === 1`, 8000));
       check(`${tag}: exit control is labelled`, await b.evaluate(`document.querySelector('[data-fullscreen-toggle]').getAttribute('aria-label') === 'Exit full screen' && document.querySelector('[data-fullscreen-toggle]').getAttribute('aria-pressed') === 'true'`));
-      await b.screenshot(`fa-02-fullscreen-${tag}-${expanded.mode}`);
+      await b.screenshot(`doc-02-fullscreen-${tag}-${expanded.mode}`);
       await b.clickSelector("[data-fullscreen-toggle]");
       check(`${tag}: full screen exits back to the page`, await b.waitFor(`document.querySelector('[data-viewer-state]').dataset.expanded === 'none'`, 5000));
 
@@ -669,40 +629,26 @@ async function browserChecks({ leadA, title, draftId, revision }) {
         check("fallback: overlay opens when the Fullscreen API is unavailable", await b.waitFor(`document.querySelector('[data-viewer-state]').dataset.expanded === 'fallback' && getComputedStyle(document.querySelector('[data-viewer-state]')).position === 'fixed'`, 5000));
         await b.key("Escape", "Escape", 27);
         check("fallback: Esc closes the overlay", await b.waitFor(`document.querySelector('[data-viewer-state]').dataset.expanded === 'none'`, 5000));
-
-        const download = await b.evaluate(`fetch('/p/${token}/download').then((r) => ({ status: r.status, disposition: r.headers.get('content-disposition'), type: r.headers.get('content-type') }))`);
-        check("browser: Download PDF link serves an attachment", download.status === 200 && download.type === "application/pdf" && download.disposition.startsWith("attachment;"), JSON.stringify(download));
+        const removed = await b.evaluate(`fetch('/p/${token}/download').then((r) => ({ status: r.status, type: r.headers.get('content-type') }))`);
+        check("browser: the removed download route answers 404", removed.status === 404 && !(removed.type ?? "").includes("pdf"), JSON.stringify(removed));
       }
     }
 
-    // A preview link shows no download controls.
+    // Dashboard: Manage Document dialog has no access-mode controls.
     await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-    const previewProposal = await createDraft(leadA, `Browser preview ${runId}`);
-    const up = await upload(leadA, previewProposal.id, await makePdf(4, "Prev"));
-    const offer = await act(leadA, "saveOfferAction", { proposalId: previewProposal.id, expectedRevision: up.data.document.revision, freePages: "2", price: "12", currency: "USD" });
-    const previewLink = await act(leadA, "generateLinkAction", { proposalId: previewProposal.id, expectedPreviewRevision: offer.data.preview.revision });
-    await b.navigate(`/p/${tokenOf(previewLink)}`);
-    await b.waitFor(`!!document.querySelector('[data-rendered-page] canvas')`, 20000);
-    check("preview link: no download controls in the viewer", await b.evaluate(`!document.querySelector('[data-downloads]') && !document.body.innerText.includes('Download PDF')`));
-    check("preview link: full screen and fit page also available", await b.evaluate(`!!document.querySelector('[data-fullscreen-toggle]') && !!document.querySelector('[aria-label="Fit page"]')`));
-    await b.screenshot("fa-03-preview-desktop");
-
-    // Dashboard: Manage Document dialog.
     for (const [name, value] of leadA.jar) await b.send("Network.setCookie", { name, value, url: FULL_URL, httpOnly: true, sameSite: "Lax" });
     await b.navigate(`/dashboard?tab=history&q=${encodeURIComponent(title)}`);
     const manage = `button[aria-label="Manage Document and link for ${title}"]`;
     check("dashboard: 'Manage Document' button present", await b.waitFor(`!!document.querySelector(${JSON.stringify(manage)}) && !document.querySelector(${JSON.stringify(manage)}).disabled`, 20000));
-    check("dashboard: History shows Full Access and the manual grant", await b.evaluate(`document.body.innerText.includes('Full Access') && document.body.innerText.includes('Manual full access')`));
+    check("dashboard: History shows no Full Access label", await b.evaluate(`!document.body.innerText.includes('Manual full access') && !/\\bFull Access\\b/.test(document.body.innerText)`));
     await b.clickSelector(manage);
     check("dialog: titled 'Manage document and link'", await b.waitFor(`document.querySelector('dialog[open]')?.innerText.includes('Manage document and link')`, 10000));
-    check("dialog: shows the manual grant and its internal note", await b.waitFor(`!!document.querySelector('dialog[open] [data-manual-grant]') && document.querySelector('dialog[open] [data-manual-grant]').innerText.includes('browser run')`, 10000));
-    check("dialog: mode can't be changed while the link is active", await b.evaluate(`document.querySelector('dialog[open] [data-access-mode] input[value=preview]').matches(':disabled')`));
-    check("dialog: Full Access warning is shown", await b.evaluate(`document.querySelector('dialog[open] [data-full-access-warning]').innerText.includes('Anyone holding this full-access link can read and download the complete document')`));
-    await b.screenshot("fa-04-dialog-desktop");
+    check("dialog: no access-mode choice, grant or Full Access warning", await b.evaluate(`!document.querySelector('dialog[open] [data-access-mode]') && !document.querySelector('dialog[open] [data-manual-grant]') && !document.querySelector('dialog[open] [data-full-access-warning]') && !/Full Access/.test(document.querySelector('dialog[open]').innerText)`));
+    await b.screenshot("doc-03-dialog-desktop");
     await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await sleep(500);
     check("dialog: no horizontal scroll on a phone", await b.evaluate(`document.documentElement.scrollWidth <= innerWidth`));
-    await b.screenshot("fa-05-dialog-mobile");
+    await b.screenshot("doc-04-dialog-mobile");
     console.log(`       screenshots: ${shots}`);
   } finally {
     await b.close();

@@ -78,7 +78,6 @@ export function ProposalsSection({
               <PdfStateBadge
                 hasOriginal={proposal.has_original}
                 hasPreview={proposal.has_preview}
-                accessMode={proposal.access_mode}
                 sourceFormat={proposal.source_format}
               />
             </Cell>

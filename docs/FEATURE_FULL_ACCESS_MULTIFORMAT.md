@@ -1,3 +1,5 @@
+> **Update (2026-10-29): manual Full Access has been removed.** Migration `20261103090000_remove_manual_full_access.sql` revoked every Full Access link (proposals became Preview drafts; documents and files kept), ended open grants (rows kept as history) and dropped the Full Access functions. `/p/<token>/document`, `/download` and `/original` no longer exist. The only way to see the whole document is a verified PayPal purchase. Multi-format uploads (§3, §4, §6) are unchanged. Sections 2 and 5 below describe the removed feature.
+
 # Feature: Manual Full Access, document download and multi-format uploads
 
 Status: **built and tested locally**. Nothing is deployed, and PayPal stays disabled. Real Word/OpenDocument/RTF conversion has **not** been verified: LibreOffice isn't installed on this machine (see §8).

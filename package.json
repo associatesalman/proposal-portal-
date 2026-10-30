@@ -28,13 +28,14 @@
     "measure:bundles": "node supabase/tests/integration/measure-bundles.mjs",
     "test:ui": "node supabase/tests/integration/phase6-ui.mjs",
     "health": "node scripts/health-check.mjs",
+    "paypal:check": "node scripts/paypal-check.mjs",
     "storage:cleanup": "node scripts/storage-cleanup.mjs",
     "test:hardening": "node supabase/tests/integration/phase7-hardening.mjs",
     "test:history": "node supabase/tests/integration/feature-history-deletion.mjs",
     "test:history-browser": "node supabase/tests/integration/feature-history-browser.mjs",
     "test:cron": "node supabase/tests/integration/deploy-cron.mjs",
     "test:payments": "node supabase/tests/integration/feature-payments.mjs",
-    "test:full-access": "node supabase/tests/integration/feature-full-access.mjs"
+    "test:documents": "node supabase/tests/integration/feature-documents.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

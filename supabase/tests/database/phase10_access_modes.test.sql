@@ -1,11 +1,9 @@
--- Full Access links, manual grants and multi-format sources (pgTAP).
--- Covers: browser roles can't set modes or touch grants; the 15/12/3 manual
--- workflow (preview link -> revoke -> Full Access on the same stored
--- document -> new link; the old token stays invalid); preview and full
--- tokens resolve only their own objects; no payment is created for a Full
--- Access link; one-page documents; source files in storage policies,
--- deletion protection and cleanup; grants end on revoke and deletion; the
--- dashboard view; cross-lead denial and CEO access.
+-- Manual Full Access removed (20261103090000) and multi-format sources (pgTAP).
+-- Covers: the Full Access functions are gone and access_mode is pinned to
+-- 'preview'; grants are read-only history; preview links still issue,
+-- revoke and re-issue on the same stored document (the old token stays
+-- invalid); source files in storage policies, purchase protection and
+-- cleanup; deletion still ends any open grant; cross-lead denial.
 -- Runs in one transaction that is rolled back; all data is disposable.
 
 begin;
@@ -58,24 +56,28 @@ from unnest(array[
   '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f2/ea000000-0000-4000-8000-000000000004/original.pdf'
 ]) as n;
 
--- 1. Browser roles ------------------------------------------------------------------
+-- 1. Full Access is gone ----------------------------------------------------------
 select ok(
   (select access_mode from public.proposals where id = 'da000000-0000-4000-8000-0000000000f1') = 'preview',
-  'proposals default to Preview mode (existing rows keep their behaviour)'
+  'proposals are in Preview mode'
 );
-select ok(not has_column_privilege('authenticated', 'public.proposals', 'access_mode', 'UPDATE'), 'authenticated may not set the access mode directly');
+select is((select count(*)::int from public.proposals where access_mode <> 'preview'), 0, 'no proposal is in Full Access mode');
+select hasnt_function('public', 'proposal_issue_full_link', 'proposal_issue_full_link is dropped');
+select hasnt_function('public', 'proposal_set_access_mode', 'proposal_set_access_mode is dropped');
+select hasnt_function('public', 'resolve_proposal_full_access', 'resolve_proposal_full_access is dropped');
+select hasnt_function('public', 'resolve_proposal_full_object', 'resolve_proposal_full_object is dropped');
+select throws_ok(
+  $$ update public.proposals set access_mode = 'full' where id = 'da000000-0000-4000-8000-0000000000f1' $$,
+  '23514', null, 'access_mode can no longer be set to full'
+);
+select is((select count(*)::int from public.proposal_full_access_grants where ended_at is null), 0, 'no grant is open');
+select ok(not has_column_privilege('authenticated', 'public.proposals', 'access_mode', 'UPDATE'), 'authenticated may not set the access mode');
 select ok(not has_column_privilege('authenticated', 'public.proposals', 'source_storage_path', 'UPDATE'), 'authenticated may not set a source path');
-select ok(has_column_privilege('authenticated', 'public.proposals', 'access_mode', 'SELECT'), 'authenticated may read the access mode (RLS-limited)');
 select ok(not has_table_privilege('authenticated', 'public.proposal_full_access_grants', 'INSERT'), 'authenticated may not create grants');
 select ok(not has_table_privilege('authenticated', 'public.proposal_full_access_grants', 'UPDATE'), 'authenticated may not change grants');
 select ok(not has_table_privilege('authenticated', 'public.proposal_full_access_grants', 'DELETE'), 'authenticated may not delete grants');
 select ok(not has_table_privilege('anon', 'public.proposal_full_access_grants', 'SELECT'), 'anon may not read grants');
-select ok(not has_function_privilege('authenticated', 'public.proposal_set_access_mode(uuid, uuid, text)', 'EXECUTE'), 'authenticated may not call proposal_set_access_mode');
-select ok(not has_function_privilege('anon', 'public.proposal_issue_full_link(uuid, uuid, text, text, text)', 'EXECUTE'), 'anon may not issue Full Access links');
-select ok(not has_function_privilege('authenticated', 'public.proposal_issue_full_link(uuid, uuid, text, text, text)', 'EXECUTE'), 'authenticated may not issue Full Access links');
 select ok(not has_function_privilege('authenticated', 'public.proposal_attach_document(uuid, uuid, text, text, text, text, bigint, text, bigint, integer)', 'EXECUTE'), 'authenticated may not record documents');
-select ok(not has_function_privilege('anon', 'public.resolve_proposal_full_object(text)', 'EXECUTE'), 'anon may not resolve storage paths of Full Access links');
-select ok(has_function_privilege('anon', 'public.resolve_proposal_full_access(text)', 'EXECUTE'), 'anon may resolve the display fields of a Full Access link');
 select ok(
   (select allowed_mime_types @> array['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
    from storage.buckets where id = 'proposals'),
@@ -83,12 +85,10 @@ select ok(
 );
 select ok((select not public from storage.buckets where id = 'proposals'), 'the bucket stays private');
 
--- 2. The manual 15/12/3 workflow ------------------------------------------------------
+-- 2. Preview links: issue, revoke, re-issue on the same document ------------------------
 set local role service_role;
-
 select lives_ok(
-  $$ select public.proposal_issue_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf',
+  $$ select public.proposal_issue_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf',
        encode(extensions.digest(repeat('X', 43), 'sha256'), 'hex')) $$,
   'a preview link (12 free of 15) is issued'
 );
@@ -97,142 +97,33 @@ select results_eq(
   $$ values (15, 12) $$,
   'the preview token resolves to 12 free pages of 15'
 );
-select is_empty($$ select * from public.resolve_proposal_full_access(repeat('X', 43)) $$, 'a preview token is not a Full Access token');
-select is_empty($$ select * from public.resolve_proposal_full_object(repeat('X', 43)) $$, 'a preview token resolves no complete document');
-
+select ok(public.resolve_proposal_preview_object(repeat('X', 43)) = '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf', 'the preview token resolves only the preview PDF');
 select throws_ok(
-  $$ select public.proposal_set_access_mode('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', 'full') $$,
-  'PT423', null, 'the mode cannot change behind an active link'
-);
-reset role;
-select throws_ok(
-  $$ update public.proposals set access_mode = 'full' where id = 'da000000-0000-4000-8000-0000000000f1' $$,
-  'PT423', null, 'the lock trigger also blocks a direct mode change while active'
-);
-set local role service_role;
-
-select lives_ok(
-  $$ select public.proposal_revoke_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1') $$,
-  'the preview link is revoked'
-);
-select is_empty($$ select * from public.resolve_proposal_offer(repeat('X', 43)) $$, 'the revoked preview token no longer resolves');
-
-select throws_ok(
-  $$ select public.proposal_set_access_mode('1a222222-2222-4222-8222-222222222222', 'da000000-0000-4000-8000-0000000000f1', 'full') $$,
-  'PT404', null, 'another Team Lead cannot change the mode'
-);
-select throws_ok(
-  $$ select public.proposal_set_access_mode('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', 'everything') $$,
-  '22023', null, 'an unknown mode is refused'
-);
-select lives_ok(
-  $$ select public.proposal_set_access_mode('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', 'full') $$,
-  'the owner selects Full Access for the same stored document'
-);
-select throws_ok(
-  $$ select public.proposal_issue_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf',
-       encode(extensions.digest(repeat('Z', 43), 'sha256'), 'hex')) $$,
-  'PT409', null, 'a preview link cannot be issued in Full Access mode'
-);
-select throws_ok(
-  $$ select public.proposal_issue_full_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-00000000000f/original.pdf',
-       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex'), null) $$,
-  'PT409', null, 'a Full Access link is refused for a stale document revision'
-);
-select throws_ok(
-  $$ select public.proposal_issue_full_link('1a222222-2222-4222-8222-222222222222', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
-       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex'), null) $$,
-  'PT404', null, 'another Team Lead cannot grant Full Access'
-);
-select throws_ok(
-  $$ select public.proposal_issue_full_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
-       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex'), repeat('n', 501)) $$,
-  '22023', null, 'an internal note over 500 characters is refused'
-);
--- The CEO grants it for lead A's proposal.
-select lives_ok(
-  $$ select public.proposal_issue_full_link('1a333333-3333-4333-8333-333333333333', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
-       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex'), '  Paid by bank transfer, INV-15  ') $$,
-  'the CEO generates a new Full Access link (manual grant)'
-);
-select results_eq(
-  $$ select granted_by, revision_id, document_path, total_pages, note, ended_at is null
-     from public.proposal_full_access_grants where proposal_id = 'da000000-0000-4000-8000-0000000000f1' $$,
-  $$ values ('1a333333-3333-4333-8333-333333333333'::uuid, 'ea000000-0000-4000-8000-000000000001'::uuid,
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
-       15, 'Paid by bank transfer, INV-15', true) $$,
-  'the grant records who, when, which revision, the page count and the trimmed note'
-);
-select results_eq(
-  $$ select title, total_pages, source_format from public.resolve_proposal_full_access(repeat('Y', 43)) $$,
-  $$ values ('Fifteen pages'::text, 15, null::text) $$,
-  'the new token resolves to all 15 pages (display fields only)'
-);
-select results_eq(
-  $$ select original_path, source_path from public.resolve_proposal_full_object(repeat('Y', 43)) $$,
-  $$ values ('1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf'::text, null::text) $$,
-  'the Full Access token is bound to the canonical PDF of its revision'
-);
-select is_empty($$ select * from public.resolve_proposal_offer(repeat('Y', 43)) $$, 'a Full Access token is not a preview token');
-select ok(public.resolve_proposal_preview_object(repeat('Y', 43)) is null, 'a Full Access token resolves no preview object');
-select is_empty($$ select * from public.resolve_proposal_full_access(repeat('X', 43)) $$, 'the old preview token stays invalid');
-select is_empty($$ select * from public.resolve_proposal_offer(repeat('X', 43)) $$, 'the old preview token stays invalid for previews too');
-
-select is_empty(
-  $$ select * from public.payment_begin_checkout(repeat('Y', 43), repeat('a', 64), 'sandbox') $$,
-  'checkout is refused for a Full Access link'
-);
-select is(
-  (select count(*)::int from public.payments where proposal_id = 'da000000-0000-4000-8000-0000000000f1'),
-  0, 'no payment record is created or faked for a manual grant'
-);
-
-select throws_ok(
-  $$ select * from public.proposal_attach_document('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
+  $$ select * from public.proposal_attach_document('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
        '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000009/original.pdf',
        null, null, null, 'x.pdf', 10, 3) $$,
-  'PT423', null, 'the document behind an active Full Access link cannot be replaced'
+  'PT423', null, 'the document behind an active link cannot be replaced'
 );
-
--- 3. Dashboard view and grant visibility ----------------------------------------------
-reset role;
-set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"1a111111-1111-4111-8111-111111111111","role":"authenticated"}', true);
-select results_eq(
-  $$ select access_mode, full_access_granted_at is not null, full_access_granted_by_name
-     from public.proposal_list where id = 'da000000-0000-4000-8000-0000000000f1' $$,
-  $$ values ('full'::text, true, 'P10 Admin'::text) $$,
-  'the owner sees Full Access and the open manual grant in the dashboard view'
+select lives_ok($$ select public.proposal_revoke_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1') $$, 'the preview link is revoked');
+select is_empty($$ select * from public.resolve_proposal_offer(repeat('X', 43)) $$, 'the revoked token no longer resolves');
+select throws_ok(
+  $$ select public.proposal_issue_link('1a222222-2222-4222-8222-222222222222', 'da000000-0000-4000-8000-0000000000f1', '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf',
+       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex')) $$,
+  'PT404', null, 'another Team Lead cannot issue a link'
 );
-select is((select count(*)::int from public.proposal_full_access_grants), 1, 'the owner can read their grant');
-select set_config('request.jwt.claims', '{"sub":"1a222222-2222-4222-8222-222222222222","role":"authenticated"}', true);
-select is((select count(*)::int from public.proposal_full_access_grants), 0, 'another Team Lead cannot read the grant');
-select is((select count(*)::int from public.proposal_list where id = 'da000000-0000-4000-8000-0000000000f1'), 0, 'another Team Lead cannot see the proposal');
-select set_config('request.jwt.claims', '{"sub":"1a333333-3333-4333-8333-333333333333","role":"authenticated"}', true);
-select is((select count(*)::int from public.proposal_full_access_grants), 1, 'the CEO can read every grant');
-reset role;
-
--- 4. Revocation ends the grant ------------------------------------------------------
-set local role service_role;
 select lives_ok(
-  $$ select public.proposal_revoke_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1') $$,
-  'the Full Access link is revoked'
+  $$ select public.proposal_issue_link('1a333333-3333-4333-8333-333333333333', 'da000000-0000-4000-8000-0000000000f1', '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/preview.pdf',
+       encode(extensions.digest(repeat('Y', 43), 'sha256'), 'hex')) $$,
+  'the CEO issues a new preview link without re-uploading'
 );
 select results_eq(
-  $$ select ended_by, ended_at is not null from public.proposal_full_access_grants where proposal_id = 'da000000-0000-4000-8000-0000000000f1' $$,
-  $$ values ('1a111111-1111-4111-8111-111111111111'::uuid, true) $$,
-  'revoking ends the grant and records who ended it'
+  $$ select total_pages, free_preview_pages from public.resolve_proposal_offer(repeat('Y', 43)) $$,
+  $$ values (15, 12) $$,
+  'the new link is a preview link (12 of 15), never the whole document'
 );
-select is_empty($$ select * from public.resolve_proposal_full_access(repeat('Y', 43)) $$, 'the revoked Full Access token no longer resolves');
-select is_empty($$ select * from public.resolve_proposal_full_object(repeat('Y', 43)) $$, 'the revoked Full Access token delivers nothing');
+select is_empty($$ select * from public.resolve_proposal_offer(repeat('X', 43)) $$, 'the old token stays invalid');
 
--- 5. One-page documents and source files -------------------------------------------------
+-- 3. Source files (multi-format uploads) ------------------------------------------------
 select throws_ok(
   $$ select * from public.proposal_attach_document('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f2', null,
        '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f2/ea000000-0000-4000-8000-000000000002/original.pdf',
@@ -253,30 +144,6 @@ select lives_ok(
        '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f2/ea000000-0000-4000-8000-000000000002/source.docx',
        'docx', 2000, 'one.docx', 900, 1) $$,
   'a one-page DOCX revision (source + canonical PDF) is recorded'
-);
-select lives_ok(
-  $$ select public.proposal_set_access_mode('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f2', 'full') $$,
-  'Full Access is selected for the one-page document'
-);
-select lives_ok(
-  $$ select public.proposal_issue_full_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f2',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f2/ea000000-0000-4000-8000-000000000002/original.pdf',
-       encode(extensions.digest(repeat('W', 43), 'sha256'), 'hex'), null) $$,
-  'a one-page document gets a Full Access link without preview or price'
-);
-select results_eq(
-  $$ select total_pages, source_format from public.resolve_proposal_full_access(repeat('W', 43)) $$,
-  $$ values (1, 'docx'::text) $$,
-  'the one-page Full Access link resolves with its source format'
-);
-select results_eq(
-  $$ select source_path, source_format from public.resolve_proposal_full_object(repeat('W', 43)) $$,
-  $$ values ('1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f2/ea000000-0000-4000-8000-000000000002/source.docx'::text, 'docx'::text) $$,
-  'the Full Access link may deliver its own revision''s original'
-);
-select lives_ok(
-  $$ select public.proposal_revoke_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f2') $$,
-  'the one-page link is revoked'
 );
 -- Replace with revision 3 (ODT): revision 2's files become unreferenced.
 select results_eq(
@@ -378,27 +245,19 @@ select results_eq(
   'cleanup recheck never deletes a purchased source file'
 );
 
--- 6. Deletion ends an open grant ----------------------------------------------------
+-- 4. Deletion still ends an open grant (history rows from before the removal) ------------
+insert into public.proposal_full_access_grants (proposal_id, owner_id, granted_by, granted_at, revision_id, document_path, total_pages)
+values ('da000000-0000-4000-8000-0000000000f1', '1a111111-1111-4111-8111-111111111111', '1a111111-1111-4111-8111-111111111111', now(), 'ea000000-0000-4000-8000-000000000001', '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf', 15);
 set local role service_role;
-select lives_ok(
-  $$ select public.proposal_issue_full_link('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1',
-       '1a111111-1111-4111-8111-111111111111/da000000-0000-4000-8000-0000000000f1/ea000000-0000-4000-8000-000000000001/original.pdf',
-       encode(extensions.digest(repeat('V', 43), 'sha256'), 'hex'), null) $$,
-  'a second Full Access link for F is issued'
-);
 select lives_ok(
   $$ select * from public.proposal_begin_deletion('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1') $$,
   'deletion starts'
 );
 select is(
   (select count(*)::int from public.proposal_full_access_grants where proposal_id = 'da000000-0000-4000-8000-0000000000f1' and ended_at is null),
-  0, 'starting deletion ends the open grant'
+  0, 'starting deletion ends an open grant'
 );
-select is_empty($$ select * from public.resolve_proposal_full_object(repeat('V', 43)) $$, 'a proposal being deleted delivers nothing');
-select throws_ok(
-  $$ select public.proposal_set_access_mode('1a111111-1111-4111-8111-111111111111', 'da000000-0000-4000-8000-0000000000f1', 'preview') $$,
-  'PT410', null, 'a proposal being deleted cannot change mode'
-);
+select is_empty($$ select * from public.resolve_proposal_offer(repeat('Y', 43)) $$, 'a proposal being deleted has no working link');
 reset role;
 
 select * from finish();

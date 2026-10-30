@@ -108,7 +108,7 @@ async function main(b) {
   await b.screenshot("p4-01-dialog-empty");
 
   // A file that isn't really a PDF -> inline server error. (One-page
-  // documents are allowed now: they can be shared with Full Access.)
+  // documents are accepted at upload; they just can't get a preview link.)
   await b.setFile("dialog[open] input[type=file]", notPdf);
   await b.clickText("button", "Upload document", dialog);
   check(

@@ -12,8 +12,6 @@ export type ProposalSetup = {
   clientName: string;
   ownerName: string | null;
   status: "draft" | "active" | "archived";
-  // What the (next) link shows; changeable only while there is no link.
-  accessMode: "preview" | "full";
   document: {
     revision: string;
     fileName: string | null;
@@ -30,8 +28,6 @@ export type ProposalSetup = {
     currency: CurrencyCode | null;
   };
   link: { createdAt: string } | null;
-  // The open manual Full Access grant behind the active link (internal).
-  fullAccess: { grantedAt: string; grantedByName: string | null; note: string | null } | null;
   // Upload formats this server accepts right now.
   upload: UploadFormats & { maxMb: number };
 };
@@ -41,7 +37,7 @@ export type SetupResult<T> =
   | {
       ok: false;
       message: string;
-      fieldErrors?: Partial<Record<"file" | "freePages" | "price" | "currency" | "note", string>>;
+      fieldErrors?: Partial<Record<"file" | "freePages" | "price" | "currency", string>>;
       // The proposal changed elsewhere; reload before trying again.
       stale?: boolean;
     };

@@ -97,6 +97,7 @@ async function Purchase({
             freePages={payment.total_pages}
             totalPages={payment.total_pages}
             variant="full"
+            downloadUrl={`/purchase/${ref}/document?download=1`}
           />
           <p className="text-xs text-subtle">
             Bookmark this page to return to your document in this browser. Forwarding it doesn&apos;t give anyone else

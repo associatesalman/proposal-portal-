@@ -1,5 +1,5 @@
 // Test double for headless LibreOffice (soffice), used ONLY by
-// feature-full-access.mjs through LIBREOFFICE_TEST_DOUBLE. It lets the
+// feature-documents.mjs through LIBREOFFICE_TEST_DOUBLE. It lets the
 // tests exercise the app's converter adapter (src/lib/documents/
 // libreoffice.ts): arguments, isolated workspace, hardened profile, minimal
 // environment, timeouts, failures, output limits and cleanup. It does NOT

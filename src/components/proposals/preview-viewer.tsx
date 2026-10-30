@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  FileDown,
   Link2Off,
   Loader2,
   Lock,
@@ -56,8 +55,8 @@ import {
 // Reading controls: previous/next and a page box, fit to width (default),
 // fit page, zoom, and full screen (the Fullscreen API where available;
 // otherwise a fixed full-window overlay, closed with Esc or the same
-// button). Download links appear only when the server passes `downloads`
-// (Full Access links).
+// button). A "Download PDF" link appears only when the server passes
+// `downloadUrl` (a verified purchase; the route re-checks access).
 
 type Pdfjs = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
@@ -71,11 +70,6 @@ type LoadState =
 type Zoom = { mode: "fit" } | { mode: "page" } | { mode: "manual"; value: number };
 
 type Expanded = "none" | "native" | "fallback";
-
-export type ViewerDownloads = {
-  pdfUrl: string;
-  original?: { url: string; label: string };
-};
 
 // PDF points (1/72 in) to CSS pixels (1/96 in): "100%" is the printed size.
 const CSS_UNITS = 96 / 72;
@@ -152,15 +146,15 @@ export function PreviewViewer({
   freePages,
   totalPages,
   variant = "preview",
-  downloads = null,
+  downloadUrl = null,
 }: {
   previewUrl: string;
   freePages: number;
   totalPages: number;
   // "full": the complete document (all pages, no locked notice).
   variant?: "preview" | "full";
-  // Download links (Full Access links only).
-  downloads?: ViewerDownloads | null;
+  // Purchased documents only: the authorized download route.
+  downloadUrl?: string | null;
 }) {
   const full = variant === "full";
   const MESSAGES = full ? DOCUMENT_MESSAGES : PREVIEW_MESSAGES;
@@ -639,28 +633,11 @@ export function PreviewViewer({
           </button>
         </div>
 
-        {downloads ? (
-          <div className="flex items-center gap-1.5" data-downloads>
-            <a href={downloads.pdfUrl} download className={primaryLink} data-download="pdf">
-              <Download className="size-4" aria-hidden="true" />
-              Download PDF
-            </a>
-            {downloads.original ? (
-              <a
-                href={downloads.original.url}
-                download
-                className={button}
-                data-download="original"
-                aria-label={`Download original (${downloads.original.label})`}
-              >
-                <FileDown className="size-4" aria-hidden="true" />
-                <span>
-                  <span className="hidden sm:inline">Download </span>original
-                  <span className="text-muted"> ({downloads.original.label})</span>
-                </span>
-              </a>
-            ) : null}
-          </div>
+        {downloadUrl ? (
+          <a href={downloadUrl} download className={primaryLink} data-download="pdf">
+            <Download className="size-4" aria-hidden="true" />
+            Download PDF
+          </a>
         ) : null}
       </div>
 

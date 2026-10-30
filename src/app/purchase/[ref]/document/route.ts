@@ -12,7 +12,9 @@ import { openPurchasedDocument } from "@/lib/supabase/privileged-payments";
 // ACTIVE entitlement of this purchase (suspended after a full refund or
 // reversal). The file is the exact revision that was bought, even if the
 // proposal's document or link changed since. Nothing is cached, and the
-// response can't be embedded or read cross-site.
+// response can't be embedded or read cross-site. `?download=1` (the paid
+// view's "Download PDF") only switches the response to an attachment; the
+// authorization is identical.
 
 const NO_STORE = "private, no-store, max-age=0";
 
@@ -26,6 +28,7 @@ function plain(status: number, message: string, extra: Record<string, string> = 
 export async function GET(request: Request, ctx: RouteContext<"/purchase/[ref]/document">) {
   await connection();
   const { ref } = await ctx.params;
+  const asDownload = new URL(request.url).searchParams.get("download") === "1";
 
   // Same-origin fetches (the viewer) or direct navigation only.
   const site = request.headers.get("sec-fetch-site");
@@ -57,7 +60,7 @@ export async function GET(request: Request, ctx: RouteContext<"/purchase/[ref]/d
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": 'inline; filename="proposal.pdf"',
+      "Content-Disposition": `${asDownload ? "attachment" : "inline"}; filename="proposal.pdf"`,
       "Cache-Control": NO_STORE,
       "X-Content-Type-Options": "nosniff",
       "Cross-Origin-Resource-Policy": "same-origin",

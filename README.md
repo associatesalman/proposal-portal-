@@ -65,7 +65,8 @@ npm run test:cron         # scheduled cleanup endpoint + production headers (own
 npm run test:history      # display names, client-page privacy, Proposal History, permanent deletion (needs `npm run start`)
 CHROME_PATH="..." npm run test:history-browser -- <screenshot-dir> # name dialog, History filters, delete dialog, locked-page placeholders
 npm run test:payments     # Phase 8 payments against PayPal test doubles (own servers)
-CHROME_PATH="..." npm run test:full-access -- <screenshot-dir>    # Full Access, downloads, formats, converter adapter, viewer (own servers on :3104/:3105; needs `npm run build`)
+CHROME_PATH="..." npm run test:documents -- <screenshot-dir>     # formats, converter adapter, preview links, removed Full Access routes, viewer (own servers on :3104/:3105; needs `npm run build`)
+npm run paypal:check [-- --auth]   # PayPal settings by name only; --auth asks the SANDBOX for an OAuth token (no order, no charge)
 ```
 
 `npm run dev` and `npm run build` first copy the PDF.js worker and data files into `public/pdfjs/<version>/` (`scripts/copy-pdfjs-assets.mjs`, gitignored).
@@ -140,6 +141,8 @@ Folders without code yet hold a `.gitkeep`. The app routes so far are `/login`, 
 - [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — unresolved decisions
 
 ## Current status
+
+**Manual Full Access has been removed** (migration `20261103090000_remove_manual_full_access.sql`). Every client link is a preview link; the whole document is delivered only to a browser with a verified PayPal purchase. Multi-format uploads are unchanged. The notes below about Full Access are history. PayPal sandbox testing: see [docs/PAYPAL_SETUP.md](docs/PAYPAL_SETUP.md).
 
 **Feature update: Manual Full Access, document download and multi-format uploads is built and tested locally (not deployed; PayPal still off).** See [docs/FEATURE_FULL_ACCESS_MULTIFORMAT.md](docs/FEATURE_FULL_ACCESS_MULTIFORMAT.md).
 

@@ -3,8 +3,7 @@ import { createHash } from "node:crypto";
 import { clientAddress } from "./client-ip";
 import { consumeAll, consumeRate, rateKey, rateRule, type RateDecision } from "./rate-limit";
 
-// Rate limits for private client links (/p/<token>, its preview, and the
-// document and downloads of Full Access links).
+// Rate limits for private client links (/p/<token> and its preview).
 //
 // Keys: the client address (see client-ip.ts) and, for the preview, the
 // link's token hash. The raw token never leaves the request: it is SHA-256
@@ -31,21 +30,6 @@ export async function limitLinkPreview(headers: Headers, token: string): Promise
     { rule: rateRule("link_preview_ip"), key: addressKey(headers) },
     { rule: rateRule("link_preview_token"), key: tokenKey(token) },
   ]);
-}
-
-// Full Access links: the inline document (viewer) and the downloads.
-export async function limitLinkDocument(headers: Headers, token: string, kind: "view" | "download"): Promise<RateDecision> {
-  return consumeAll(
-    kind === "view"
-      ? [
-          { rule: rateRule("link_document_ip"), key: addressKey(headers) },
-          { rule: rateRule("link_document_token"), key: tokenKey(token) },
-        ]
-      : [
-          { rule: rateRule("link_download_ip"), key: addressKey(headers) },
-          { rule: rateRule("link_download_token"), key: tokenKey(token) },
-        ],
-  );
 }
 
 // Called after a lookup found no active link for the token. Over the limit,

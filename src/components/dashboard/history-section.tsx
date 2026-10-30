@@ -2,7 +2,7 @@ import { dashboardHref, HISTORY_STATUS_LABELS, type DashboardParams } from "@/li
 import type { Page, ProposalListRow } from "@/lib/dashboard/queries";
 import { formatDate } from "@/lib/format";
 
-import { AccessModeBadge, PdfStateBadge, ProposalStatusBadge } from "./badges";
+import { PdfStateBadge, ProposalStatusBadge } from "./badges";
 import { Cell, DataTable, Row } from "./data-table";
 import { LoadError, NoRecords, NoResults, PastLastPage } from "./list-states";
 import { Pagination } from "./pagination";
@@ -60,7 +60,6 @@ export function HistorySection({
     { label: "Client" },
     { label: "Status" },
     { label: "Document" },
-    { label: "Access" },
     { label: "Created" },
     { label: "Link issued" },
     ...(isAdmin ? [{ label: "Owner" }] : []),
@@ -87,12 +86,8 @@ export function HistorySection({
                 <PdfStateBadge
                   hasOriginal={proposal.has_original}
                   hasPreview={proposal.has_preview}
-                  accessMode={proposal.access_mode}
                   sourceFormat={proposal.source_format}
                 />
-              </Cell>
-              <Cell label="Access">
-                <AccessModeBadge accessMode={proposal.access_mode} grantedAt={proposal.full_access_granted_at} />
               </Cell>
               <Cell label="Created" className="whitespace-nowrap text-muted">
                 {formatDate(proposal.created_at)}

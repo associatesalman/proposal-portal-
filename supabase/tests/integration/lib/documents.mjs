@@ -1,4 +1,4 @@
-// Disposable document fixtures for feature-full-access.mjs, built in memory:
+// Disposable document fixtures for feature-documents.mjs, built in memory:
 // minimal but structurally valid DOCX/ODT packages (ZIP), legacy DOC files
 // (Compound File Binary), RTF and text, plus hostile variants (macros,
 // external references, encryption, zip bombs). ZIP entries are STORED by

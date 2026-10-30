@@ -607,8 +607,13 @@ async function main() {
     const bytes = Buffer.from(await doc.arrayBuffer());
     check("full document is served (all 6 pages)", doc.status === 200 && (await pageCount(bytes)) === 6);
     check("document response is no-store and same-origin only", (doc.headers.get("cache-control") ?? "").includes("no-store") && doc.headers.get("cross-origin-resource-policy") === "same-origin");
+    const dl = await request(buyer, `/purchase/${body.ref}/document?download=1`);
+    const dlBytes = Buffer.from(await dl.arrayBuffer());
+    check("Download PDF: attachment of the same purchased 6-page PDF", dl.status === 200 && (dl.headers.get("content-disposition") ?? "").startsWith("attachment;") && (await pageCount(dlBytes)) === 6 && (dl.headers.get("cache-control") ?? "").includes("no-store"));
+    check("inline view stays inline", (doc.headers.get("content-disposition") ?? "").startsWith("inline;"));
     const { html: client } = await page(buyer, `/p/${alpha.token}`);
     check("client link shows the paid view in the paying browser", client.includes("data-paid-view") && !client.includes("data-checkout"));
+    check("paid views offer Download PDF", client.includes(`/purchase/${body.ref}/document?download=1`) && purchase.includes(`/purchase/${body.ref}/document?download=1`));
     const { html: again2 } = await page(buyer, `/purchase/${body.ref}`);
     check("access survives a refresh", again2.includes("Payment received successfully"));
 
@@ -626,6 +631,8 @@ async function main() {
     check("forwarded purchase URL: not available", purchase.includes("isn&#x27;t available in this browser") && !purchase.includes("Payment received"));
     const doc = await request(other, `/purchase/${paid.ref}/document`);
     check("forwarded document URL: 404", doc.status === 404);
+    check("forwarded download URL: 404", (await request(other, `/purchase/${paid.ref}/document?download=1`)).status === 404);
+    check("forwarded client link offers no download", !html.includes("document?download=1"));
     const st = await status(other, paid.ref);
     check("another browser cannot query the purchase status (404)", st.status === 404);
     const stolen = browser();
@@ -794,6 +801,7 @@ async function main() {
     const full = await paymentById(paid.row.id);
     check("full refund: refunded", full.status === "refunded" && full.refunded_amount_minor === 2500);
     check("full refund: document access ends", (await request(buyer, `/purchase/${paid.ref}/document`)).status === 404);
+    check("full refund: download ends too", (await request(buyer, `/purchase/${paid.ref}/document?download=1`)).status === 404);
     const { html } = await page(buyer, `/purchase/${paid.ref}`);
     check("full refund: purchase page says refunded, no success", !html.includes("data-payment-success"));
     const { data: ent } = await trusted.from("payment_entitlements").select("status").eq("payment_id", paid.row.id).single();

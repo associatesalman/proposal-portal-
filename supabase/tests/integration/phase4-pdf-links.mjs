@@ -508,7 +508,7 @@ async function main() {
     check(`rejects ${label}`, !res.ok && res.stage === "complete" && pattern.test(res.message), res.message);
   }
   {
-    // One-page documents are accepted (they can be shared with Full Access).
+    // One-page documents are accepted (a preview link needs two or more pages).
     const propOne = await createDraft(leadA, `One page ${runId}`);
     const res = await uploadPdf(leadA, propOne, await makePdf(1, "one"));
     check("accepts a one-page PDF", res.ok, res.message);

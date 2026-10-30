@@ -8,7 +8,6 @@ import { Suspense } from "react";
 import { CheckoutButton } from "@/components/proposals/checkout-button";
 import { LockedPagePlaceholders } from "@/components/proposals/locked-pages";
 import { PreviewViewer } from "@/components/proposals/preview-viewer";
-import { formatLabel, type SourceFormat } from "@/lib/documents/formats";
 import { RecoveryRequest } from "@/components/proposals/recovery-request";
 import { BrandMark } from "@/components/ui/brand";
 import { ServiceUnavailable } from "@/components/ui/service-unavailable";
@@ -37,13 +36,6 @@ import { accessForLink } from "@/lib/supabase/privileged-payments";
 // a retry is shown instead. Page requests are rate-limited in src/proxy.ts.
 // Response headers (no-store, no-referrer, noindex) are set in
 // next.config.ts.
-//
-// Full Access links (granted manually in the dashboard, e.g. after an
-// offline payment): the database says the link is in Full Access mode, and
-// the page shows the complete document with "Download PDF" (and "Download
-// original" when the upload wasn't a PDF). No preview split, price, locked
-// pages or payment panel. The mode is never taken from the URL: a preview
-// link can't be turned into a Full Access one by any parameter.
 //
 // Payments: a browser that holds paid access to this proposal (its HttpOnly
 // session cookie has an access session for an active purchase) sees the
@@ -115,11 +107,6 @@ async function ResolvedProposal({ params }: { params: PageProps<"/p/[token]">["p
         </p>
       </div>
     );
-  }
-
-  if (resolution.status === "full") {
-    const { title, totalPages, sourceFormat } = resolution.document;
-    return <FullAccessProposal token={token} title={title} totalPages={totalPages} sourceFormat={sourceFormat} />;
   }
 
   const { title, totalPages, freePages, lockedPages, priceMinor, currency } = resolution.proposal;
@@ -252,6 +239,7 @@ function PaidProposal({
         freePages={totalPages}
         totalPages={totalPages}
         variant="full"
+        downloadUrl={`/purchase/${publicRef}/document?download=1`}
       />
       <p className="text-xs text-subtle">
         Bookmark{" "}
@@ -259,43 +247,6 @@ function PaidProposal({
           your purchase page
         </Link>{" "}
         to come back to this document in this browser. Forwarding the link doesn&apos;t give anyone else access.
-      </p>
-    </div>
-  );
-}
-
-function FullAccessProposal({
-  token,
-  title,
-  totalPages,
-  sourceFormat,
-}: {
-  token: string;
-  title: string;
-  totalPages: number;
-  sourceFormat: SourceFormat | null;
-}) {
-  return (
-    <div className="space-y-5 sm:space-y-6" data-full-access-view>
-      <div className="min-w-0 space-y-1.5">
-        <h1 className="break-words text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</h1>
-        <p className="text-sm text-muted" data-full-summary>
-          Full document: {totalPages} {totalPages === 1 ? "page" : "pages"}. You can read it here or download it.
-        </p>
-      </div>
-      <PreviewViewer
-        previewUrl={`/p/${token}/document`}
-        freePages={totalPages}
-        totalPages={totalPages}
-        variant="full"
-        downloads={{
-          pdfUrl: `/p/${token}/download`,
-          original: sourceFormat ? { url: `/p/${token}/original`, label: formatLabel(sourceFormat) } : undefined,
-        }}
-      />
-      <p className="text-xs text-subtle">
-        This page is private to whoever holds the link: anyone you forward it to can read and download the full
-        document.
       </p>
     </div>
   );

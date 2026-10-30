@@ -91,7 +91,7 @@ export type Database = {
           link_created_at: string | null;
           deletion_requested_at: string | null;
           deletion_requested_by: string | null;
-          access_mode: "preview" | "full";
+          access_mode: "preview";
           source_storage_path: string | null;
           source_format: "docx" | "doc" | "odt" | "rtf" | "txt" | null;
           source_size_bytes: number | null;
@@ -116,7 +116,7 @@ export type Database = {
           link_created_at?: string | null;
           deletion_requested_at?: string | null;
           deletion_requested_by?: string | null;
-          access_mode?: "preview" | "full";
+          access_mode?: "preview";
           source_storage_path?: string | null;
           source_format?: "docx" | "doc" | "odt" | "rtf" | "txt" | null;
           source_size_bytes?: number | null;
@@ -141,7 +141,7 @@ export type Database = {
           link_created_at?: string | null;
           deletion_requested_at?: string | null;
           deletion_requested_by?: string | null;
-          access_mode?: "preview" | "full";
+          access_mode?: "preview";
           source_storage_path?: string | null;
           source_format?: "docx" | "doc" | "odt" | "rtf" | "txt" | null;
           source_size_bytes?: number | null;
@@ -334,7 +334,7 @@ export type Database = {
           link_created_at: string | null;
           deletion_requested_at: string | null;
           has_payments: boolean | null;
-          access_mode: "preview" | "full";
+          access_mode: "preview";
           source_format: string | null;
           full_access_granted_at: string | null;
           full_access_granted_by_name: string | null;
@@ -538,20 +538,6 @@ export type Database = {
           previous_source_path: string | null;
         }[];
       };
-      proposal_set_access_mode: {
-        Args: { p_actor: string; p_proposal_id: string; p_mode: "preview" | "full" };
-        Returns: undefined;
-      };
-      proposal_issue_full_link: {
-        Args: {
-          p_actor: string;
-          p_proposal_id: string;
-          p_expected_original_path: string;
-          p_token_hash: string;
-          p_note: string | null;
-        };
-        Returns: string;
-      };
       proposal_save_offer: {
         Args: {
           p_actor: string;
@@ -606,16 +592,6 @@ export type Database = {
           unlock_price_minor: number;
           currency: string;
         }[];
-      };
-      // Executable by anon: client page fields of a Full Access link.
-      resolve_proposal_full_access: {
-        Args: { p_token: string };
-        Returns: { title: string; total_pages: number; source_format: string | null }[];
-      };
-      // service_role only: objects a Full Access link may deliver.
-      resolve_proposal_full_object: {
-        Args: { p_token: string };
-        Returns: { title: string; original_path: string; source_path: string | null; source_format: string | null }[];
       };
       // Phase 5, service_role only: preview object path for streaming.
       resolve_proposal_preview_object: {

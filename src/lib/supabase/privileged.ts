@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { getServerSupabaseConfig } from "@/lib/supabase/config";
 import { createBoundedFetch } from "@/lib/supabase/fetch";
-import { isSourceFormat, type SourceFormat } from "@/lib/documents/formats";
+import type { SourceFormat } from "@/lib/documents/formats";
 import { PROPOSALS_BUCKET } from "@/lib/proposals/paths";
 import type { Database } from "@/types/database";
 
@@ -14,13 +14,10 @@ import type { Database } from "@/types/database";
 //   - record a verified document revision: canonical PDF + optional source
 //     file  (proposal_attach_document)
 //   - record a generated preview and offer  (proposal_save_offer)
-//   - set the access mode of a draft  (proposal_set_access_mode)
-//   - activate / revoke a private link  (proposal_issue_link,
-//     proposal_issue_full_link + manual grant record / proposal_revoke_link)
+//   - activate / revoke a private link  (proposal_issue_link /
+//     proposal_revoke_link)
 //   - stream the preview PDF of the proposal a client link resolves to
 //     (resolve_proposal_preview_object + one storage read), Phase 5
-//   - stream the complete document (PDF or source) of a Full Access link
-//     (resolve_proposal_full_object + one storage read)
 //   - permanently delete a proposal: mark + revoke, remove the objects in
 //     its own storage folder, delete the row (proposal_*_deletion)
 //   - run the storage cleanup on a schedule (runStorageCleanup from
@@ -101,41 +98,6 @@ export async function recordVerifiedOriginal(args: {
       previousSourcePath: row?.previous_source_path ?? null,
     },
   };
-}
-
-// Draft only (the database refuses otherwise): what the NEXT link will be.
-export async function setAccessMode(args: {
-  actorId: string;
-  proposalId: string;
-  mode: "preview" | "full";
-}): Promise<Result<null>> {
-  const { error } = await privilegedClient().rpc("proposal_set_access_mode", {
-    p_actor: args.actorId,
-    p_proposal_id: args.proposalId,
-    p_mode: args.mode,
-  });
-  if (error) return failure(error);
-  return { ok: true, data: null };
-}
-
-// Issues a Full Access link bound to the current document revision and
-// records the manual grant (who, when, revision, optional note).
-export async function activateFullAccessLink(args: {
-  actorId: string;
-  proposalId: string;
-  expectedOriginalPath: string;
-  tokenHash: string;
-  note: string | null;
-}): Promise<Result<{ createdAt: string }>> {
-  const { data, error } = await privilegedClient().rpc("proposal_issue_full_link", {
-    p_actor: args.actorId,
-    p_proposal_id: args.proposalId,
-    p_expected_original_path: args.expectedOriginalPath,
-    p_token_hash: args.tokenHash,
-    p_note: args.note,
-  });
-  if (error) return failure(error);
-  return { ok: true, data: { createdAt: data } };
 }
 
 export async function recordPreviewAndOffer(args: {
@@ -279,51 +241,6 @@ export async function openPreviewForLink(token: string): Promise<PreviewObject> 
     return { ok: false, reason: status === 404 || code === "NoSuchKey" ? "missing" : "error" };
   }
   return { ok: true, stream: stream as ReadableStream<Uint8Array> };
-}
-
-export type FullDocumentKind = "pdf" | "original";
-
-export type FullDocumentObject =
-  | {
-      ok: true;
-      stream: ReadableStream<Uint8Array>;
-      title: string;
-      // The source format for "original" (null for "pdf").
-      format: SourceFormat | null;
-    }
-  | { ok: false; reason: "unavailable" | "missing" | "error" };
-
-// The complete document of a Full Access link (the canonical PDF, or the
-// original source file when it wasn't a PDF). The token is the only input;
-// the object path comes from the proposal row and its open grant. Preview
-// links, revoked links and proposals being deleted resolve to nothing.
-export async function openFullDocumentForLink(token: string, kind: FullDocumentKind): Promise<FullDocumentObject> {
-  const client = privilegedClient();
-  const { data, error } = await client.rpc("resolve_proposal_full_object", { p_token: token });
-  if (error) return { ok: false, reason: "error" };
-  const row = data?.[0];
-  if (!row) return { ok: false, reason: "unavailable" };
-
-  let path: string;
-  let format: SourceFormat | null = null;
-  if (kind === "pdf") {
-    if (!row.original_path?.endsWith("/original.pdf")) return { ok: false, reason: "unavailable" };
-    path = row.original_path;
-  } else {
-    if (!row.source_path || !isSourceFormat(row.source_format) || !row.source_path.endsWith(`/source.${row.source_format}`)) {
-      return { ok: false, reason: "unavailable" };
-    }
-    path = row.source_path;
-    format = row.source_format;
-  }
-
-  const { data: stream, error: storageError } = await client.storage.from(PROPOSALS_BUCKET).download(path).asStream();
-  if (storageError || !stream) {
-    const status = (storageError as { status?: number } | null)?.status;
-    const code = (storageError as { code?: string } | null)?.code;
-    return { ok: false, reason: status === 404 || code === "NoSuchKey" ? "missing" : "error" };
-  }
-  return { ok: true, stream: stream as ReadableStream<Uint8Array>, title: row.title, format };
 }
 
 export type ScheduledCleanupSummary = {
